@@ -57,9 +57,33 @@ THE SOFTWARE.
     <f:textbox/>
   </f:entry>
 
+  <f:entry field="volumesString" title="${%Volumes}">
+    <f:expandableTextbox/>
+  </f:entry>
+
+  <f:entry field="poolSize" title="${%Pool Size}">
+    <f:textbox default="0"/>
+  </f:entry>
+
   <f:advanced>
     <f:entry field="privileged" title="${%Run in privileged mode}">
       <f:checkbox/>
+    </f:entry>
+
+    <f:entry field="cpuLimit" title="${%CPU limit}">
+      <f:textbox/>
+    </f:entry>
+
+    <f:entry field="memoryLimit" title="${%Memory limit}">
+      <f:textbox/>
+    </f:entry>
+
+    <f:entry field="cpuRequest" title="${%CPU request}">
+      <f:textbox/>
+    </f:entry>
+
+    <f:entry field="memoryRequest" title="${%Memory request}">
+      <f:textbox/>
     </f:entry>
   </f:advanced>
 

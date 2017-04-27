@@ -12,6 +12,7 @@ import org.kohsuke.stapler.DataBoundSetter;
 
 import com.google.common.base.Preconditions;
 
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -34,6 +35,18 @@ public class PodTemplate extends AbstractDescribableImpl<PodTemplate> {
     private int instanceCap;
 
     private String label;
+
+    private String volumesString;
+
+    private int poolSize;
+
+    private String cpuLimit;
+
+    private String memoryLimit;
+
+    private String cpuRequest;
+
+    private String memoryRequest;
 
     @DataBoundConstructor
     public PodTemplate(String image) {
@@ -121,6 +134,60 @@ public class PodTemplate extends AbstractDescribableImpl<PodTemplate> {
 
     public String getLabel() {
         return label;
+    }
+
+    @DataBoundSetter
+    public void setVolumesString(String volumesString) {
+        this.volumesString = volumesString;
+    }
+
+    public String getVolumesString() {
+        return volumesString;
+    }
+
+    @DataBoundSetter
+    public void setPoolSize(int poolSize) {
+        this.poolSize = poolSize;
+    }
+
+    public int getPoolSize() {
+        return poolSize;
+    }
+
+    @DataBoundSetter
+    public void setCpuRequest(String cpuRequest) {
+        this.cpuRequest = cpuRequest;
+    }
+
+    public String getCpuRequest() {
+        return cpuRequest;
+    }
+
+    @DataBoundSetter
+    public void setMemoryRequest(String memoryRequest) {
+        this.memoryRequest = memoryRequest;
+    }
+
+    public String getMemoryRequest() {
+        return memoryRequest;
+    }
+
+    @DataBoundSetter
+    public void setCpuLimit(String cpuLimit) {
+        this.cpuLimit = cpuLimit;
+    }
+
+    public String getCpuLimit() {
+        return cpuLimit;
+    }
+
+    @DataBoundSetter
+    public void setMemoryLimit(String memoryLimit) {
+        this.memoryLimit = memoryLimit;
+    }
+
+    public String getMemoryLimit() {
+        return memoryLimit;
     }
 
     @DataBoundSetter

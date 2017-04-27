@@ -10,6 +10,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.base.Splitter;
+import com.google.common.collect.Iterables;
 
 import hudson.Extension;
 import hudson.Util;
@@ -17,9 +19,11 @@ import hudson.model.Computer;
 import hudson.model.Descriptor;
 import hudson.model.Label;
 import hudson.model.Node;
+import hudson.model.labels.LabelAtom;
 import hudson.security.ACL;
 import hudson.slaves.Cloud;
 import hudson.slaves.NodeProvisioner;
+import hudson.slaves.NodeProvisioner.PlannedNode;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
 import io.fabric8.kubernetes.api.Kubernetes;
@@ -27,10 +31,15 @@ import io.fabric8.kubernetes.api.KubernetesHelper;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerStatus;
 import io.fabric8.kubernetes.api.model.EnvVar;
+import io.fabric8.kubernetes.api.model.HostPathVolumeSource;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.api.model.PodSpec;
+import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.SecurityContext;
+import io.fabric8.kubernetes.api.model.Volume;
+import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.utils.Filter;
 import jenkins.model.Jenkins;
 import jenkins.model.JenkinsLocationConfiguration;
@@ -47,8 +56,10 @@ import java.security.UnrecoverableKeyException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -90,12 +101,13 @@ public class KubernetesCloud extends Cloud {
     @CheckForNull
     private String credentialsId;
     private final int containerCap;
+    private final String nodeSelector;
 
     private transient Kubernetes connection;
 
     @DataBoundConstructor
     public KubernetesCloud(String name, List<? extends PodTemplate> templates, String serverUrl, String namespace,
-            String jenkinsUrl, String containerCapStr, int connectTimeout, int readTimeout) {
+            String jenkinsUrl, String containerCapStr, String nodeSelector, int connectTimeout, int readTimeout) {
         super(name);
 
         Preconditions.checkArgument(!StringUtils.isBlank(serverUrl));
@@ -113,6 +125,7 @@ public class KubernetesCloud extends Cloud {
         } else {
             this.containerCap = Integer.parseInt(containerCapStr);
         }
+        this.nodeSelector = nodeSelector;
     }
 
 
@@ -176,6 +189,10 @@ public class KubernetesCloud extends Cloud {
         }
     }
 
+    public String getNodeSelector() {
+        return nodeSelector;
+    }
+
     /**
      * Connects to Docker.
      *
@@ -221,6 +238,73 @@ public class KubernetesCloud extends Cloud {
         if (template.isPrivileged())
             manifestContainer.setSecurityContext(new SecurityContext(null, true, null, null));
 
+        // parse Docker volumes
+        String[] volumeArray = splitAndFilterEmpty(template.getVolumesString(), "\n");
+        List<Volume> hostPathvolumes = new ArrayList<Volume>();
+        List<VolumeMount> containerVolumes = new ArrayList<VolumeMount>();
+        for (int i=0; i < volumeArray.length; i++) {
+            String[] volumePair = splitAndFilterEmpty(volumeArray[i], ":");
+
+            if (volumePair.length >= 2) {
+                String volumeName = "volume" + i;
+
+                // host path volume
+                Volume hostPathVolume = new Volume();
+                hostPathVolume.setHostPath(new HostPathVolumeSource(volumePair[0]));
+                hostPathVolume.setName(volumeName);
+                hostPathvolumes.add(hostPathVolume);
+
+                //volume mounts
+                VolumeMount containerVolume = new VolumeMount();
+                containerVolume.setMountPath(volumePair[1]);
+                containerVolume.setName(volumeName);
+                containerVolumes.add(containerVolume);
+            } else {
+                  LOGGER.log(Level.INFO, "Will not mount:" + volumeArray[i]);
+            }
+        }
+
+        // volume mounts
+        manifestContainer.setVolumeMounts(containerVolumes);
+
+
+        // Resource limitation
+        String cpuLimit = template.getCpuLimit();
+        String memoryLimit = template.getMemoryLimit();
+        Map<String, Quantity> limits = null;
+
+        if (!StringUtils.isBlank(cpuLimit) && !StringUtils.isBlank(memoryLimit)) {
+            limits = new HashMap<String, Quantity>();
+            if (!StringUtils.isBlank(cpuLimit)) {
+                limits.put("cpu", new Quantity(cpuLimit));
+            }
+
+            if (!StringUtils.isBlank(memoryLimit)) {
+                limits.put("memory", new Quantity(memoryLimit));
+            }
+        }
+
+        // Resource request
+        String cpuRequest = template.getCpuRequest();
+        String memoryRequest = template.getMemoryRequest();
+        Map<String, Quantity> requests = null;
+
+        if (!StringUtils.isBlank(cpuRequest) && !StringUtils.isBlank(memoryRequest)) {
+            requests = new HashMap<String, Quantity>();
+            if (!StringUtils.isBlank(cpuRequest)) {
+                requests.put("cpu", new Quantity(cpuRequest));
+            }
+
+            if (!StringUtils.isBlank(memoryRequest)) {
+                requests.put("memory", new Quantity(memoryRequest));
+            }
+        }
+
+        if (limits != null || requests != null) {
+            ResourceRequirements resources = new ResourceRequirements(limits, requests);
+            manifestContainer.setResources(resources);
+        }
+
         List<EnvVar> env = new ArrayList<EnvVar>(3);
         // always add some env vars
         env.add(new EnvVar("JENKINS_SECRET", slave.getComputer().getJnlpMac(), null));
@@ -251,6 +335,16 @@ public class KubernetesCloud extends Cloud {
         podSpec.setContainers(containers);
         podSpec.setRestartPolicy("Never");
 
+        // node selector
+        String[] nodeLabel = nodeSelector.split("=");
+        if (nodeLabel.length == 2) {
+            podSpec.setNodeSelector(ImmutableMap.of(nodeLabel[0], nodeLabel[1]));
+        } else if (nodeSelector != "") {
+            LOGGER.log(Level.WARNING, "Error with the node selector configuration: " + nodeSelector);
+        }
+
+        // host path volume
+        podSpec.setVolumes(hostPathvolumes);
         return pod;
     }
 
@@ -301,6 +395,43 @@ public class KubernetesCloud extends Cloud {
             return Collections.emptyList();
         }
     }
+
+    public synchronized int maintainPodPool(final Label label) {
+        if (label == null) {
+            return 0;
+        }
+
+        final int poolSize = getTemplate(label).getPoolSize();
+        if (poolSize <= 0) {
+            return 0;
+        }
+
+        Jenkins hudson = Jenkins.getInstance();
+        List<Node> nodes = hudson.getNodes();
+        int count = 0;
+
+        for (Node node : nodes) {
+            Set<LabelAtom> labelSet = node.getAssignedLabels();
+            LOGGER.log(Level.INFO, "The label string of node {0} is {1}", new Object[]{node.getDisplayName(), node.getLabelString()});
+            for (Label l : labelSet) {
+                if (l.getExpression().equals(label.toString())) {
+                    count++;
+                }
+            }
+        }
+
+        // Limit the max size of the pool as pool size add number of queue jobs
+        int additionalNum = poolSize + hudson.getQueue().countBuildableItemsFor(label) - count;
+
+        if (additionalNum > 0) {
+            LOGGER.log(Level.INFO, "The number of pods with label {0} is {1}, still need to provision another {2} pods", new Object[]{label, count, additionalNum});
+            Collection<PlannedNode> additionalPods = provision(label, additionalNum);
+            LOGGER.log(Level.INFO, "Successfully provisioned {0} pods for the pod pool of label {1}", new Object[]{additionalPods.size(), label});
+            return additionalPods.size();
+        }
+        return 0;
+    }
+
 
     private class ProvisioningCallback implements Callable<Node> {
         private final KubernetesCloud cloud;
@@ -414,17 +545,19 @@ public class KubernetesCloud extends Cloud {
         int c = 0;
         int t = 0;
         for (Pod pod : allPods.getItems()) {
-            if (slaveFilter.matches(pod)) {
-                if (++c > containerCap) {
-                    LOGGER.log(Level.INFO, "Total container cap of " + containerCap + " reached, not provisioning.");
-                    return false; // maxed out
+            if (!pod.getStatus().getPhase().equals("Failed")) {
+                if (slaveFilter.matches(pod)) {
+                    if (++c > containerCap) {
+                        LOGGER.log(Level.INFO, "Total container cap of " + containerCap + " reached, not provisioning.");
+                        return false; // maxed out
+                    }
                 }
-            }
-            if (nameFilter.matches(pod)) {
-                if (++t > template.getInstanceCap()) {
-                    LOGGER.log(Level.INFO, "Template instance cap of " + template.getInstanceCap() + " reached for template "
-                            + template.getImage() + ", not provisioning.");
-                    return false; // maxed out
+                if (nameFilter.matches(pod)) {
+                    if (++t > template.getInstanceCap()) {
+                        LOGGER.log(Level.INFO, "Template instance cap of " + template.getInstanceCap() + " reached for template "
+                                + template.getImage() + ", not provisioning.");
+                        return false; // maxed out
+                    }
                 }
             }
         }
@@ -524,4 +657,9 @@ public class KubernetesCloud extends Cloud {
         return this;
     }
 
+    //TODO move/replace
+    public static String[] splitAndFilterEmpty(String s, String separator) {
+        Iterable<String> list = Splitter.on(separator).omitEmptyStrings().split(s);
+        return Iterables.toArray(list, String.class);
+    }
 }

@@ -1,6 +1,17 @@
 jenkins-kubernetes-plugin
 =========================
 
+> This plugin has been customized with following features:
+> - Support container slave pool
+> - Support CPU/memory request/limit
+> - Support node selector
+> - Support volume sharing
+> - Support filtering failed container slaves
+>
+> **`Note`**:
+> - Most of above features have been implemented in the latest version, except the most important feature `Support container slave pool`.
+> - This plugin has stably run in production for 2+ years, on [Jenkins](https://github.com/kohsuke/jenkins) v1.599 and v2.7.2, [Kubernetes](https://github.com/kubernetes/kubernetes) v1.1.4 and v1.2.4.
+
 Jenkins plugin to run dynamic slaves in a Kubernetes/Docker environment.
 
 Based on the [Scaling Docker with Kubernetes](http://www.infoq.com/articles/scaling-docker-with-kubernetes) article,
