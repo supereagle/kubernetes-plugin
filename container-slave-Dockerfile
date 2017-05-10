@@ -1,0 +1,57 @@
+# This Dockerfile is used to build an image with basic configurations for K8s to be used as Jenkins container slave
+FROM centos:6.6
+
+# Set the timezone
+RUN echo "ZONE=Asia/Shanghai" > /etc/sysconfig/clock \
+    && rm /etc/localtime \
+    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+
+# Create jenkins user and group
+ENV JENKINS_HOME /home/jenkins
+RUN groupadd -g 1010 jenkins \
+    && adduser -d $JENKINS_HOME -g jenkins -u 1010 jenkins \
+    && echo "jenkins:jenkins" | chpasswd
+
+# Add all users in jenkins group as sudoers
+RUN echo "# add all users in jenkins group as sudoers" >> /etc/sudoers \
+    && echo "%jenkins        ALL=(ALL)       NOPASSWD: ALL" >> /etc/sudoers \
+    && chmod 440 /etc/sudoers
+
+# Create docker user and group
+RUN groupadd -g 1011 docker \
+    && adduser -d /home/docker -g docker -u 1011 docker \
+    && groupmems -g docker -a jenkins
+
+# Copy and change mode of slave start script
+COPY jenkins-slave.sh /usr/local/bin/jenkins-slave.sh
+RUN chmod +x /usr/local/bin/jenkins-slave.sh
+
+# Add docker and git config
+# ADD .dockercfg .gitconfig .git-credentials $JENKINS_HOME/
+# ADD config.json $JENKINS_HOME/.docker/
+
+# Install the necessary softwares
+RUN yum install -y \
+     dos2unix \
+     git \
+     sudo \
+     svn \
+     tar \
+     unzip \
+     wget \
+     which \
+     zip \
+   && yum -y clean all
+
+# Download remoting jar to connect slave through JNLP
+ENV JENKINS_REMOTING_VERSION 2.49
+RUN curl --create-dirs -sSLo /usr/share/jenkins/remoting-$JENKINS_REMOTING_VERSION.jar http://repo.jenkins-ci.org/public/org/jenkins-ci/main/remoting/$JENKINS_REMOTING_VERSION/remoting-$JENKINS_REMOTING_VERSION.jar \
+    chmod 755 /usr/share/jenkins    
+    
+# Workaround for docker issue #14203
+ENV DOCKER_FIX='                                        '    
+
+# Set the environment
+ENV LANG=en_US.UTF-8
+
+ENTRYPOINT ["/usr/local/bin/jenkins-slave.sh"]

@@ -10,6 +10,7 @@ jenkins-kubernetes-plugin
 >
 > **`Note`**:
 > - Most of above features have been implemented in the latest version, except the most important feature `Support container slave pool`.
+> - The `container-slave-Dockerfile` and `jenkins-slave.sh` can be used to customize your slave image. You can also refer to [official slave image](https://github.com/jenkinsci/docker-jnlp-slave).
 > - This plugin has stably run in production for 2+ years, on [Jenkins](https://github.com/kohsuke/jenkins) v1.599 and v2.7.2, [Kubernetes](https://github.com/kubernetes/kubernetes) v1.1.4 and v1.2.4.
 
 Jenkins plugin to run dynamic slaves in a Kubernetes/Docker environment.
